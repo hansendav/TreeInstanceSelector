@@ -20,6 +20,8 @@ LABEL_KEYS = {
 }
     
 
+# TODO: Fix proper closing of the annotator. 
+
 
 class PointCloudAnnotator: 
     def __init__(self, label_keys: dict, label_log: str): 
@@ -111,11 +113,7 @@ class PointCloudAnnotator:
 
 
 def main(args): 
-    processed_log = Path(args.processed_log)
     annotation_log = Path(args.annotation_log)
-
-    if not processed_log.exists():
-        processed_log.touch() 
 
     if not annotation_log.exists():
         annotation_log.touch()
@@ -166,7 +164,6 @@ def main(args):
 if __name__ == '__main__': 
     parser = argparse.ArgumentParser() 
     parser.add_argument('--data_dir', type=str) 
-    parser.add_argument('--processed_log', type=str)
     parser.add_argument('--annotation_log', type=str)
 
     args = parser.parse_args() 
