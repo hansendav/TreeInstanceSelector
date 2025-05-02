@@ -12,16 +12,10 @@ from utils import list_recursive_files, read_h5
 # comment out following if not on WSL 
 os.environ['XDG_SESSION_TYPE'] = 'x11'
 
-annotations = {}
-LABEL_KEYS = {
-    '1': 'take', 
-    '2': 'leave',
-    '9': 'end'
-}
-    
 
 # TODO: Fix proper closing of the annotator. 
 
+np.random.seed(42)
 
 class PointCloudAnnotator: 
     def __init__(self, label_keys: dict, label_log: str): 
@@ -34,7 +28,7 @@ class PointCloudAnnotator:
         self.current_file_id = None 
         self.annotation_done = False
         self.stop_annotation = False
- 
+        self.redo_annotation = False 
 
         self.vis.create_window(window_name="Point Cloud Annotator", width=800, height=600)
         self.opt = self.vis.get_render_option() 
@@ -43,11 +37,14 @@ class PointCloudAnnotator:
         self.opt.show_coordinate_frame = True 
         self.point_color = [0, 0.5, 0] # Green
 
-        
         self.vis.add_geometry(self.pcd)
 
         for key, label in self.label_keys.items():
             self.vis.register_key_callback(ord(key), self.make_callback(label))
+
+        # Register redo callback
+        self.vis.register_key_callback(ord('r'), self.redo_callback)
+        
 
     def set_instance(self, file_id, points): 
         self.current_file_id = file_id 
@@ -55,11 +52,11 @@ class PointCloudAnnotator:
         self.pcd.points = o3d.utility.Vector3dVector(points)
         self.pcd.colors = o3d.utility.Vector3dVector(np.tile(self.point_color, (len(points), 1)))
         
-        
         self.vis.clear_geometries()
         self.vis.add_geometry(self.pcd)
         self.annotation_done = False 
-        print(f"\n📂 File: {file_id} — Press one of {list(self.label_keys.keys())} to label or q for quit")
+        self.redo_annotation = False  # Reset redo flag
+        print(f"\n📂 File: {file_id} — Press one of {list(self.label_keys.keys())} to label, 'r' to redo, or 'q' to quit")
 
     def make_callback(self, label): 
         def callback(vis):
@@ -75,7 +72,13 @@ class PointCloudAnnotator:
                 self.annotation_done = True  # Ensure the loop exits
                 vis.close()
         return callback 
-        
+
+    def redo_callback(self, vis):
+        """Callback to redo the current annotation."""
+        print(f"🔄 Redoing annotation for '{self.current_file_id}'")
+        self.redo_annotation = True
+        self.annotation_done = True  
+
     def wait_for_annotation(self):
         while not self.annotation_done:
             if self.stop_annotation:  
@@ -87,7 +90,6 @@ class PointCloudAnnotator:
         with open(label_log, 'w') as f:
             json.dump(self.annotations, f, indent=4)
         print(f"💾 Saved to '{label_log}'")
-
 
     def close(self):
         self.vis.destroy_window()
@@ -121,11 +123,21 @@ def main(args):
 
     files_to_process = list_recursive_files(args.data_dir)
 
+    files_to_process = [f for f in files_to_process if Path(f).name != 'oslokommune_2019_1.0.h5']
+
+    print(
+        f'📂 Found {len(files_to_process)} files to process in {args.data_dir}.'
+    )
+
     label_keys = {
-        '1': 'take', 
-        '2': 'leave',
-        'q': 'end'  # Ensure 'q' is mapped to 'end'
-    }
+        '1': 'clean, no occlusion', 
+        '2': 'clean, occlusion',
+        '3': 'more than 1 tree',
+        '4': 'cut tree',
+        '5': 'fragments',
+        'q': 'end',
+    }   
+   
 
     annotator = PointCloudAnnotator(label_keys=label_keys, label_log=args.annotation_log)
     
@@ -138,9 +150,12 @@ def main(args):
         print(f"{len(instances)} instances found in file {file}")
         
         file_id = Path(file).relative_to(args.data_dir)
+        
+        if len(instances) > 500:
+            sampled_indices = np.random.choice(len(instances), size=500, replace=False)
+            instances = [instances[i] for i in sampled_indices]
 
-
-
+        
         # Loop through each instance and process individually
         for i, instance in enumerate(instances): 
             if annotator.stop_annotation:  
@@ -149,7 +164,7 @@ def main(args):
             instance_id = f'{file_id}_{i}'
 
             # Skip if the current instance is already labeled
-            if instance_id in annotator.annotations:
+            if instance_id in annotator.annotations and not annotator.redo_annotation:
                 print(f"⏩ Skipping already-labeled instance: {instance_id}")
                 continue
             
